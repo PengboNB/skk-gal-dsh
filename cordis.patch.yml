@@ -1,0 +1,4 @@
+# skk-gal: mount the independent DSH bundle.
+- insert:
+    - id: skk-gal
+      name: skk-gal
