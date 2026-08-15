@@ -65,13 +65,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 进入“丝柯克剧场”，点击右上角“界面设置”。可以调整：
 
 - 玩家名称：显示在底部用户专属对话框中。
-- 打字速度：控制最新智能体回复的逐字显示速度。
+- 打字速度：控制最新智能体回复的逐字显示速度；选择“直接显示”后会跳过逐字动画，整段回复立即出现。
 - 角色动态：启用或关闭角色呼吸、摆动和光晕动画。
 - 回复风格：启用或关闭丝柯克主题的回复风格提示词。
 
 ### DSH 快捷设置
 
 点击 DSH 左下角“设置”，选择侧栏中的“GAL 视窗”。这里可以调整同样的选项，并通过“打开剧场”立即返回丝柯克剧场。
+
+插件加载后主题会全局应用；即使当前没有选定工作区或刚打开新对话，也能看到丝柯克风格的新对话启动页、内置高清修复背景与配套侧栏样式。进入已有会话的“丝柯克剧场”后，点击“显示全文”可展开或收起实时工作流；每段思考与工具调用显示在其对应回复卡片内，顺序为“思考与执行 → 回复”。智能体请求越权操作时，剧场底部会出现授权卡片，“允许一次”和“拒绝”均使用 DSH 原生审批通道反馈。
 
 ## 5. 回复风格的生效范围
 
@@ -164,7 +166,23 @@ npm run pack:portable
 dist\skk-gal-portable.zip
 ```
 
-## 9. 更新插件
+## 9. 对话归档与内容管理
+
+在 DSH 设置中打开“GAL 视窗”，下方的“对话内容管理”会列出当前用户的已保存会话、工作目录、会话 ID和归档状态。未归档会话可直接使用 DSH 官方接口归档。
+
+DSH `0.1.0-rc.6` 的归档只是从侧边栏隐藏，不会删除内容：
+
+```text
+对话日志：%USERPROFILE%\.dsh\sessions\<项目目录>\<会话ID>\session.jsonl.zstd
+归档索引：%USERPROFILE%\.dsh\storages\workspace.json
+投影缓存：%USERPROFILE%\.dsh\storages\session_projcache.json
+```
+
+该插件为没有官方删除接口的 DSH rc.6 提供安全的两阶段删除：先归档会话，再点击“删除”并输入会话标题确认。操作会立即进入待处理队列；完全退出 DSH 后，随插件携带的助手会把日志移到 `%USERPROFILE%\.dsh\session-trash`，并同步清理 `workspace.json` 与 `session_projcache.json`。重新启动 DSH 后可在同一设置页恢复，或再次输入标题后永久删除。删除与恢复均不依赖安装盘符，队列、回收站和助手都使用当前 Windows 用户目录，因此随压缩包迁移后仍可使用。
+
+由于这些文件属于 DSH 内部持久化格式，插件不会在 DSH 运行时提供一键永久删除，以避免并发写入造成索引损坏。
+
+## 10. 更新插件
 
 获取新版本后，在新版项目目录重新执行：
 
@@ -176,7 +194,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
 安装器会替换 `%USERPROFILE%\.dsh\plugins\skk-gal`，但不会删除 `%USERPROFILE%\.dsh\skk-gal\settings.json`。随后重新启动 DSH。
 
-## 10. 卸载
+## 11. 卸载
 
 在项目或便携包目录执行：
 
@@ -192,7 +210,7 @@ Remove-Item -LiteralPath "$env:USERPROFILE\.dsh\skk-gal" -Recurse -Force
 
 该命令只删除本插件的用户设置，不会删除其他 DSH 配置。
 
-## 11. 常见问题
+## 12. 常见问题
 
 ### 提示 `install.ps1` 不存在
 
@@ -236,7 +254,7 @@ Get-NetTCPConnection -LocalPort 3080 -State Listen
 
 关闭旧的 DSH 终端，或按照当前 DSH 版本支持的参数选择其他端口。
 
-## 12. 可移植性说明
+## 13. 可移植性说明
 
 - 运行文件不包含开发电脑的绝对路径。
 - 图片内嵌于客户端构建产物，不依赖网络 URL。
@@ -245,7 +263,6 @@ Get-NetTCPConnection -LocalPort 3080 -State Listen
 - 最终用户无需安装 `esbuild` 或保留 `node_modules`。
 - 用户设置按电脑独立保存，不会随 ZIP 泄露。
 
-## 13. 素材与许可证
+## 14. 素材与许可证
 
 插件代码采用 MIT 许可证。角色、游戏名称及相关美术元素的权利归各自权利人所有。本项目为非官方个人界面定制；公开分发或二次发布素材前，请自行确认拥有相应授权。
-

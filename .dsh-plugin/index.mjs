@@ -1,11 +1,16 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 export const name = 'skk-gal'
 export const inject = ['webServer']
 
 const SETTINGS_PATH = join(homedir(), '.dsh', 'skk-gal', 'settings.json')
+const QUEUE_PATH = join(homedir(), '.dsh', 'skk-gal', 'pending-deletions.json')
+const TRASH_ROOT = join(homedir(), '.dsh', 'session-trash')
+const WORKER_PATH = fileURLToPath(new URL('./session-trash-worker.mjs', import.meta.url))
 const ACTIVE_WINDOW_MS = 15_000
 const STYLE_PROMPT = `你正在使用“丝柯克剧场”插件的角色化回复风格。请遵守以下要求：
 - 默认使用简体中文，语气冷静、克制、直接，像阅历深厚而要求严格的引导者。
@@ -26,6 +31,35 @@ async function loadSettings() {
 async function saveSettings(settings) {
   await mkdir(dirname(SETTINGS_PATH), { recursive: true })
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`, 'utf8')
+}
+
+async function loadQueue() {
+  try { return JSON.parse(await readFile(QUEUE_PATH, 'utf8')) } catch { return { items: [] } }
+}
+
+async function saveQueue(value) {
+  await mkdir(dirname(QUEUE_PATH), { recursive: true })
+  await writeFile(QUEUE_PATH, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+async function listTrash() {
+  const result = []
+  for (const item of await readdir(TRASH_ROOT, { withFileTypes: true }).catch(() => [])) {
+    if (!item.isDirectory()) continue
+    try { result.push(JSON.parse(await readFile(join(TRASH_ROOT, item.name, 'manifest.json'), 'utf8'))) } catch {}
+  }
+  return result.sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)))
+}
+
+function validSessionId(value) { return /^session-[0-9a-f-]{36}$/i.test(value) }
+function inside(root, target) {
+  const value = relative(resolve(root), resolve(target))
+  return value !== '' && !value.startsWith(`..${sep}`) && value !== '..'
+}
+
+function startWorker() {
+  const child = spawn(process.execPath, [WORKER_PATH, String(process.pid)], { detached: true, stdio: 'ignore', windowsHide: true })
+  child.unref()
 }
 
 function sendJson(res, status, value) {
@@ -81,4 +115,53 @@ export function apply(ctx) {
       }
     },
   }), 'skk-gal:settings-api')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/skk-gal/session-trash',
+    handler: async (req, res) => {
+      try {
+        if (req.method === 'GET') {
+          const queue = await loadQueue()
+          return sendJson(res, 200, { pending: queue.items || [], trash: await listTrash() })
+        }
+        if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+        const body = await readJson(req)
+        if (body.action === 'queue') {
+          if (!validSessionId(body.sessionId) || typeof body.title !== 'string' || body.confirm !== body.title) throw new Error('确认文字与会话标题不匹配')
+          const queue = await loadQueue()
+          if (!(queue.items || []).some(item => item.sessionId === body.sessionId)) queue.items.push({ action: 'delete', sessionId: body.sessionId, title: body.title, cwd: typeof body.cwd === 'string' ? body.cwd : '', queuedAt: new Date().toISOString() })
+          await saveQueue({ items: queue.items, updatedAt: new Date().toISOString() })
+          startWorker()
+          return sendJson(res, 200, { ok: true, pending: queue.items })
+        }
+        if (body.action === 'cancel') {
+          const queue = await loadQueue()
+          queue.items = (queue.items || []).filter(item => item.sessionId !== body.sessionId)
+          await saveQueue({ items: queue.items, updatedAt: new Date().toISOString() })
+          return sendJson(res, 200, { ok: true })
+        }
+        if (body.action === 'restore') {
+          const item = (await listTrash()).find(value => value.trashId === body.trashId)
+          if (!item || body.confirm !== item.title) throw new Error('确认文字与会话标题不匹配')
+          const queue = await loadQueue()
+          if (!(queue.items || []).some(value => value.trashId === item.trashId)) queue.items.push({ action: 'restore', trashId: item.trashId, sessionId: item.sessionId, title: item.title, queuedAt: new Date().toISOString() })
+          await saveQueue({ items: queue.items, updatedAt: new Date().toISOString() })
+          startWorker()
+          return sendJson(res, 200, { ok: true })
+        }
+        if (body.action === 'purge') {
+          const item = (await listTrash()).find(value => value.trashId === body.trashId)
+          if (!item || body.confirm !== item.title) throw new Error('确认文字与会话标题不匹配')
+          const target = join(TRASH_ROOT, item.trashId)
+          if (!inside(TRASH_ROOT, target)) throw new Error('unsafe trash path')
+          await rm(target, { recursive: true, force: false })
+          return sendJson(res, 200, { ok: true })
+        }
+        throw new Error('unknown action')
+      } catch (error) {
+        return sendJson(res, 400, { error: error instanceof Error ? error.message : 'invalid request' })
+      }
+    },
+  }), 'skk-gal:session-trash-api')
 }
