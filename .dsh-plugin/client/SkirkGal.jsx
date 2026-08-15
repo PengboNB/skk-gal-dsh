@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import backgroundUrl from '../../assets/abyss-background.png'
 import skirkUrl from '../../assets/skirk-hd.png'
 import sidebarArtUrl from '../../assets/sidebar-abyss.png'
+import { buildPendingResponse, pendingDescription, pendingKind, pendingQuestions, pendingTitle } from './pending.mjs'
 import { nodesToLines, partialText, workflowFromConversation } from './transcript.mjs'
 
 const SPEED = { slow: 48, normal: 25, fast: 10, instant: 0 }
@@ -12,13 +13,15 @@ function useFillConversation(rootRef) {
     const scroll = root?.closest('[data-conversation-scroll]')
     const composer = scroll?.querySelector(':scope > [data-composer-seat]')
     if (!scroll || !composer) return undefined
-    const old = { display: composer.style.display, overflow: scroll.style.overflow, position: scroll.style.position }
+    const old = { display: composer.style.display, overflow: scroll.style.overflow, overflowY: scroll.style.overflowY, position: scroll.style.position }
     composer.style.display = 'none'
     scroll.style.overflow = 'hidden'
+    scroll.style.overflowY = 'hidden'
     scroll.style.position = 'relative'
     return () => {
       composer.style.display = old.display
       scroll.style.overflow = old.overflow
+      scroll.style.overflowY = old.overflowY
       scroll.style.position = old.position
     }
   }, [rootRef])
@@ -91,9 +94,19 @@ function SidePanel({ kind, lines, settings, setSettings, close }) {
   )
 }
 
-function ApprovalCard({ wait, nodes }) {
-  const [answering, setAnswering] = useState(false)
-  const [error, setError] = useState('')
+function clickNativeTaskPanel() {
+  const candidates = [...document.querySelectorAll('button,[role="button"]')]
+    .filter(node => !node.closest('.skk-root'))
+    .filter(node => /任务|待处理|处理|授权|审批|选择/.test(node.textContent || node.getAttribute('aria-label') || ''))
+  const visible = candidates.find(node => {
+    const rect = node.getBoundingClientRect()
+    const style = getComputedStyle(node)
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+  })
+  visible?.click()
+}
+
+function commandForWait(wait, nodes) {
   const callId = wait.payload?.callId
   let command = ''
   for (const node of Array.isArray(nodes) ? nodes : []) {
@@ -101,17 +114,53 @@ function ApprovalCard({ wait, nodes }) {
     const call = node.blocks?.find(block => block?.kind === 'tool-call' && block.callId === callId)
     if (call) { try { command = JSON.parse(call.argsRaw)?.command || '' } catch {} }
   }
+  return command
+}
+
+function PendingTaskCard({ wait, nodes, index }) {
+  const [answering, setAnswering] = useState(false)
+  const [error, setError] = useState('')
+  const questions = pendingQuestions(wait)
+  const [answers, setAnswers] = useState(() => Object.fromEntries(questions.map(question => [question.id, question.options[0]?.value ?? ''])))
+  const isApproval = pendingKind(wait) === 'approval'
+  const command = commandForWait(wait, nodes)
   const answer = async outcome => {
     setAnswering(true); setError('')
     try {
-      const receipt = await wait.respond({ ok: true, value: { sessionId: wait.sessionId, approvalId: wait.payload.approvalId, outcome } })
-      if (!receipt?.accepted) throw new Error(receipt?.reason || '审批反馈未被接受')
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '审批失败'); setAnswering(false) }
+      const response = isApproval
+        ? buildPendingResponse(wait, outcome === 'reject' ? 'reject' : 'approve')
+        : buildPendingResponse(wait, outcome, { answers })
+      const receipt = await wait.respond(response)
+      if (!receipt?.accepted) throw new Error(receipt?.reason || '处理结果未被接受')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '处理失败，可尝试打开原生任务面板'); setAnswering(false) }
   }
-  return <section className="skk-approval" role="group" aria-label="操作授权">
-    <div><strong>需要你的授权</strong><span>{wait.payload?.reason || `${wait.payload?.toolName || '工具'} 请求执行受限操作`}</span>{command ? <code>{command}</code> : null}{error ? <em>{error}</em> : null}</div>
-    <div><button type="button" disabled={answering} onClick={() => answer('rejected')}>拒绝</button><button className="is-allow" type="button" disabled={answering} onClick={() => answer('allowed-once')}>允许一次</button></div>
+  return <section className="skk-pending-card" role="group" aria-label={isApproval ? '操作授权' : '待处理任务'}>
+    <div className="skk-pending-copy">
+      <strong>{pendingTitle(wait, index)}</strong>
+      <span>{pendingDescription(wait)}</span>
+      {command ? <code>{command}</code> : null}
+      {questions.length ? <div className="skk-pending-questions">
+        {questions.map(question => <label key={question.id}>{question.prompt}
+          {question.options.length ? <select value={answers[question.id] ?? ''} onChange={event => setAnswers(value => ({ ...value, [question.id]: event.target.value }))}>{question.options.map(option => <option key={option.id} value={option.value}>{option.label}</option>)}</select> : <input value={answers[question.id] ?? ''} onChange={event => setAnswers(value => ({ ...value, [question.id]: event.target.value }))} placeholder="输入处理内容" />}
+        </label>)}
+      </div> : null}
+      {error ? <em>{error}</em> : null}
+    </div>
+    <div className="skk-pending-actions">
+      <button type="button" disabled={answering} onClick={clickNativeTaskPanel}>打开任务面板</button>
+      <button type="button" disabled={answering} onClick={() => answer('reject')}>{isApproval ? '拒绝' : '取消'}</button>
+      <button className="is-allow" type="button" disabled={answering} onClick={() => answer(isApproval ? 'approve' : 'submit')}>{isApproval ? '允许一次' : '提交选择'}</button>
+    </div>
   </section>
+}
+
+function PendingTaskPanel({ pending, nodes }) {
+  const waits = Array.isArray(pending) ? pending.filter(item => item && typeof item.respond === 'function') : []
+  if (!waits.length) return null
+  return <aside className="skk-pending-panel" aria-label="待处理任务">
+    <header><strong>待处理任务</strong><span>{waits.length} 项等待你的回应</span></header>
+    {waits.map((wait, index) => <PendingTaskCard wait={wait} nodes={nodes} index={index} key={`${wait.kind || 'pending'}-${wait.sessionId || 'session'}-${wait.payload?.approvalId || wait.payload?.id || index}`} />)}
+  </aside>
 }
 
 export function loadSettings() {
@@ -157,7 +206,7 @@ export function SkirkGal({ useSession, inputActions }) {
   const [showWorkflow, setShowWorkflow] = useState(false)
   const workflows = useMemo(() => workflowFromConversation(nodes, partial, runningCalls), [nodes, partial, runningCalls])
   const workflowFor = key => workflows.filter(item => item.groupKey === key)
-  const approval = Array.isArray(pending) ? pending.find(item => item?.kind === 'approval') : null
+  const pendingCount = Array.isArray(pending) ? pending.length : 0
   const fullText = running && !live ? (Array.isArray(pending) && pending.length ? '等待你的回应……' : '正在观测深渊的回响……') : current.text
   const status = running && !live
   useFillConversation(rootRef)
@@ -220,6 +269,15 @@ export function SkirkGal({ useSession, inputActions }) {
     if (feed) feed.scrollTop = feed.scrollHeight
   }, [lines.length, shown, live])
 
+  const wheelFeed = useCallback(event => {
+    const target = event.target
+    if (target?.closest?.('.skk-panel,.skk-pending-panel,.skk-response-feed,.skk-text,input,select,textarea,button')) return
+    const feed = feedRef.current
+    if (!feed) return
+    feed.scrollTop += event.deltaY
+    event.preventDefault()
+  }, [])
+
   const send = useCallback(() => {
     const text = draft.trim()
     if (!text) return
@@ -237,7 +295,7 @@ export function SkirkGal({ useSession, inputActions }) {
   if (live) responseLines.push({ key: 'partial', role: 'skirk', name: '丝柯克', text: shown })
   if (status) responseLines.push({ key: 'status', role: 'system', name: '状态', text: fullText })
   return (
-    <main ref={rootRef} className="skk-root" data-motion={settings.motion ? 'on' : 'off'}>
+    <main ref={rootRef} className="skk-root" data-motion={settings.motion ? 'on' : 'off'} onWheel={wheelFeed}>
       <div className="skk-bg" style={{ backgroundImage: `linear-gradient(180deg, rgba(4, 8, 28, .12), rgba(3, 5, 20, .48)), url("${backgroundUrl}")` }} /><div className="skk-stars" /><div className="skk-vignette" />
       <div className="skk-topbar"><span className="skk-title">ABYSS · SKIRK THEATER</span><button className="skk-chip" type="button" onClick={() => setPanel('settings')}>界面设置</button></div>
       <div className="skk-character" style={settings.motion ? undefined : { animation: 'none' }}>
@@ -255,7 +313,7 @@ export function SkirkGal({ useSession, inputActions }) {
           ))}
         </div>
       </section>
-      {approval ? <ApprovalCard wait={approval} nodes={nodes} /> : null}
+      {pendingCount ? <PendingTaskPanel pending={pending} nodes={nodes} /> : null}
       <section className="skk-userbox" aria-label="用户对话框">
         <div className="skk-name" data-role="player">{settings.playerName || '旅行者'}</div>
         <p className="skk-user-last">{lastPlayer?.text || '等待你的指令……'}</p>
