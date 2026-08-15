@@ -1,0 +1,13 @@
+node_modules/
+dist/
+qa/
+*.log
+composed.yml
+implementation-*.png
+design-qa-comparison.png
+design-qa.md
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+.publish/
