@@ -6,6 +6,13 @@ import { buildPendingResponse, pendingDescription, pendingKind, pendingQuestions
 import { nodesToLines, partialText, workflowFromConversation } from './transcript.mjs'
 
 const SPEED = { slow: 48, normal: 25, fast: 10, instant: 0 }
+const FULL_ACCESS_PRESET = 'danger-full-access'
+
+function displayPresetName(value, name) {
+  if (value === FULL_ACCESS_PRESET) return 'Full access'
+  const source = name || value || ''
+  return source.split('-').filter(Boolean).map(part => part.slice(0, 1).toUpperCase() + part.slice(1)).join(' ') || '权限'
+}
 
 function useFillConversation(rootRef) {
   useEffect(() => {
@@ -172,6 +179,45 @@ function PendingTaskPanel({ pending, nodes }) {
   </aside>
 }
 
+function PermissionSwitcher({ permission, sessionId, switchPermission }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const options = Array.isArray(permission?.options) ? permission.options.filter(option => option.value !== 'custom') : []
+  const current = options.find(option => option.value === permission?.currentValue)
+  const label = displayPresetName(permission?.currentValue, current?.name)
+  const select = async option => {
+    if (!option?.value || option.value === permission?.currentValue) { setOpen(false); return }
+    if (option.value === FULL_ACCESS_PRESET) {
+      const ok = window.confirm('确认启用 Full access？\n\nFull access 会减少确认步骤，并允许 agent 直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。')
+      if (!ok) return
+    }
+    setBusy(true); setError('')
+    try {
+      await switchPermission(sessionId, option.value)
+      setOpen(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '权限切换失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+  if (!permission || !options.length || typeof switchPermission !== 'function') return null
+  return <div className="skk-permission">
+    <button className="skk-permission-button" type="button" aria-haspopup="listbox" aria-expanded={open} disabled={busy} onClick={() => setOpen(value => !value)}>
+      <span className="skk-permission-icon">◇</span><span>{busy ? '切换中…' : label}</span><i>⌄</i>
+    </button>
+    {open ? <div className="skk-permission-menu" role="listbox" aria-label="Agent 权限">
+      {options.map(option => <button key={option.value} type="button" role="option" aria-selected={option.value === permission.currentValue} onClick={() => select(option)}>
+        <span className="skk-permission-icon">{option.value === 'read-only' ? '◇' : option.value === FULL_ACCESS_PRESET ? '⬡' : '▱'}</span>
+        <span><strong>{displayPresetName(option.value, option.name)}</strong>{option.description ? <small>{option.description}</small> : null}</span>
+        {option.value === permission.currentValue ? <em>✓</em> : null}
+      </button>)}
+      {error ? <p>{error}</p> : null}
+    </div> : null}
+  </div>
+}
+
 export function loadSettings() {
   try {
     return { themeEnabled: true, playerName: '旅行者', speed: 'normal', motion: true, replyStyle: true, ...JSON.parse(localStorage.getItem('skk-gal:settings') || '{}') }
@@ -195,7 +241,7 @@ export function syncReplyStyle(replyStyle, active) {
   }).catch(() => {})
 }
 
-export function SkirkGal({ useSession, inputActions }) {
+export function SkirkGal({ useSession, useProjection, sessionId, inputActions, switchPermission }) {
   const rootRef = useRef(null)
   const feedRef = useRef(null)
   const nodes = useSession(s => s.nodes)
@@ -203,6 +249,7 @@ export function SkirkGal({ useSession, inputActions }) {
   const running = useSession(s => s.running)
   const pending = useSession(s => s.pending)
   const runningCalls = useSession(s => s.runningCalls)
+  const permission = typeof useProjection === 'function' ? useProjection('permissions') : undefined
   const lines = useMemo(() => nodesToLines(nodes), [nodes])
   const live = partialText(partial)
   const current = live
@@ -327,6 +374,7 @@ export function SkirkGal({ useSession, inputActions }) {
         <div className="skk-name" data-role="player">{settings.playerName || '旅行者'}</div>
         <p className="skk-user-last">{lastPlayer?.text || '等待你的指令……'}</p>
         <div className="skk-composer">
+          <PermissionSwitcher permission={permission} sessionId={sessionId} switchPermission={switchPermission} />
           <input className="skk-input" value={draft} placeholder="输入对话，Enter 发送" onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
           <button className="skk-send" type="button" aria-label="发送消息" onClick={send}>➤</button>
         </div>

@@ -7,7 +7,7 @@ import newChatBackgroundUrl from '../../assets/new-chat-background.webp'
 import sidebarArtUrl from '../../assets/sidebar-abyss.png'
 
 export const name = 'skk-gal'
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'sessions']
 
 const AUTO_OPEN_KEY = 'skk-gal:auto-open-theater-until'
 const SETTINGS_KEY = 'skk-gal:settings'
@@ -61,8 +61,18 @@ function installAutoTheaterSwitch(ctx) {
   const arm = event => {
     if (!themeEnabled()) return
     const target = event.target
-    if (!target?.closest?.('[data-slot="conversation.composer"]')) return
-    if (event.type === 'keydown' && (event.key !== 'Enter' || event.shiftKey || event.isComposing)) return
+    const composer = target?.closest?.('[data-slot="conversation.composer"]')
+    if (!composer) return
+    if (event.type === 'keydown') {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+      if (!target?.matches?.('textarea,input,[contenteditable="true"]')) return
+    } else if (event.type === 'click') {
+      const button = target?.closest?.('button,[role="button"]')
+      const label = `${button?.textContent || ''} ${button?.getAttribute?.('aria-label') || ''} ${button?.getAttribute?.('title') || ''}`.trim()
+      if (!/发送|send/i.test(label)) return
+    } else {
+      return
+    }
     sessionStorage.setItem(AUTO_OPEN_KEY, String(Date.now() + 45_000))
     setTimeout(tryOpenSkirkTheater, 300)
     setTimeout(tryOpenSkirkTheater, 1_500)
@@ -259,12 +269,21 @@ export function apply(ctx) {
   installThemeState(ctx)
   installSidebarResize(ctx)
   installAutoTheaterSwitch(ctx)
+  const switchPermission = async (sessionId, preset) => {
+    const live = ctx.sessions.binding(sessionId)?.session
+    if (!live) throw new Error('当前会话尚未就绪，无法切换权限')
+    const result = await live.command(`/permission ${preset}`)
+    if (!result?.ok) throw new Error(result?.error?.message || '权限切换失败')
+    if (!result.value?.matched) throw new Error('当前 DSH 没有提供 /permission 命令')
+    return true
+  }
 
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'skk-gal',
     order: 6,
     label: () => '丝柯克剧场',
+    inject: () => ({ switchPermission }),
   }, SkirkGal))
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
