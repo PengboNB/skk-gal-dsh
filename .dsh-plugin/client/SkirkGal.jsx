@@ -27,8 +27,12 @@ function useFillConversation(rootRef) {
   }, [rootRef])
 }
 
-function useHostTheme() {
+function useHostTheme(enabled = true) {
   useEffect(() => {
+    if (!enabled) {
+      document.body.classList.remove('skk-host-active')
+      return undefined
+    }
     document.body.classList.add('skk-host-active')
     const sidebar = document.querySelector('[data-slot="sidebar"] > div')
     const previous = sidebar ? {
@@ -50,7 +54,7 @@ function useHostTheme() {
         sidebar.style.setProperty('background-position', previous.position)
       }
     }
-  }, [])
+  }, [enabled])
 }
 
 function SidePanel({ kind, lines, settings, setSettings, close }) {
@@ -71,6 +75,11 @@ function SidePanel({ kind, lines, settings, setSettings, close }) {
         <>
           <label className="skk-setting">玩家名称
             <input value={settings.playerName} maxLength={20} onChange={e => setSettings(s => ({ ...s, playerName: e.target.value }))} />
+          </label>
+          <label className="skk-setting">GAL 视窗
+            <select value={settings.themeEnabled === false ? 'off' : 'on'} onChange={e => setSettings(s => ({ ...s, themeEnabled: e.target.value === 'on' }))}>
+              <option value="on">启用</option><option value="off">关闭并恢复 DSH 原始外观</option>
+            </select>
           </label>
           <label className="skk-setting">打字速度
             <select value={settings.speed} onChange={e => setSettings(s => ({ ...s, speed: e.target.value }))}>
@@ -165,9 +174,9 @@ function PendingTaskPanel({ pending, nodes }) {
 
 export function loadSettings() {
   try {
-    return { playerName: '旅行者', speed: 'normal', motion: true, replyStyle: true, ...JSON.parse(localStorage.getItem('skk-gal:settings') || '{}') }
+    return { themeEnabled: true, playerName: '旅行者', speed: 'normal', motion: true, replyStyle: true, ...JSON.parse(localStorage.getItem('skk-gal:settings') || '{}') }
   } catch {
-    return { playerName: '旅行者', speed: 'normal', motion: true, replyStyle: true }
+    return { themeEnabled: true, playerName: '旅行者', speed: 'normal', motion: true, replyStyle: true }
   }
 }
 
@@ -210,7 +219,7 @@ export function SkirkGal({ useSession, inputActions }) {
   const fullText = running && !live ? (Array.isArray(pending) && pending.length ? '等待你的回应……' : '正在观测深渊的回响……') : current.text
   const status = running && !live
   useFillConversation(rootRef)
-  useHostTheme()
+  useHostTheme(settings.themeEnabled !== false)
 
   useEffect(() => {
     const receive = event => setSettings(current => ({ ...current, ...event.detail }))
@@ -225,7 +234,7 @@ export function SkirkGal({ useSession, inputActions }) {
       .then(remote => { if (live && typeof remote.replyStyle === 'boolean') setSettings(value => ({ ...value, replyStyle: remote.replyStyle })) })
       .catch(() => {})
     const heartbeat = () => fetch('/skk-gal/settings', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: true }), keepalive: true,
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: settings.themeEnabled !== false }), keepalive: true,
     }).catch(() => {})
     heartbeat()
     const timer = setInterval(heartbeat, 5_000)
@@ -236,7 +245,7 @@ export function SkirkGal({ useSession, inputActions }) {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: false }), keepalive: true,
       }).catch(() => {})
     }
-  }, [])
+  }, [settings.themeEnabled])
 
   useEffect(() => {
     saveLocalSettings(settings)
@@ -246,9 +255,9 @@ export function SkirkGal({ useSession, inputActions }) {
   useEffect(() => {
     if (!replyStyleReady.current) { replyStyleReady.current = true; return }
     fetch('/skk-gal/settings', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replyStyle: settings.replyStyle, active: true }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ replyStyle: settings.replyStyle && settings.themeEnabled !== false, active: settings.themeEnabled !== false }),
     }).catch(() => {})
-  }, [settings.replyStyle])
+  }, [settings.replyStyle, settings.themeEnabled])
 
   useEffect(() => {
     if (status) { setShown(fullText); return undefined }
