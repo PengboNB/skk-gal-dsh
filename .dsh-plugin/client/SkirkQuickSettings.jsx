@@ -87,13 +87,15 @@ function SessionManager({ api }) {
 
 export function SkirkQuickSettings({ api }) {
   const [settings, setSettings] = useState(loadSettings)
+  const isThemeEnabled = settings.themeEnabled !== false
 
   useEffect(() => {
     saveLocalSettings(settings, true)
-    syncReplyStyle(settings.replyStyle && settings.themeEnabled !== false)
+    syncReplyStyle(settings.replyStyle && isThemeEnabled)
   }, [settings])
 
   const openTheater = () => {
+    if (!isThemeEnabled) return
     const tab = [...document.querySelectorAll('[role="tab"]')].find(node => node.textContent?.trim() === '丝柯克剧场')
     tab?.click()
     const close = [...document.querySelectorAll('[role="dialog"] button')].find(node => node.textContent?.trim() === '关闭')
@@ -101,7 +103,7 @@ export function SkirkQuickSettings({ api }) {
   }
 
   return <section className="skk-quick-settings">
-    <div className="skk-quick-intro"><div><strong>丝柯克剧场</strong><p>快速调整 GAL 视窗与角色回复风格。</p></div><button type="button" onClick={openTheater}>打开剧场</button></div>
+    <div className="skk-quick-intro"><div><strong>丝柯克剧场</strong><p>快速调整 GAL 视窗与角色回复风格。</p></div><button type="button" onClick={openTheater} disabled={!isThemeEnabled}>{isThemeEnabled ? '打开剧场' : '已关闭'}</button></div>
     <label className="skk-quick-toggle">GAL 视窗总开关<select value={settings.themeEnabled === false ? 'off' : 'on'} onChange={e => setSettings(s => ({ ...s, themeEnabled: e.target.value === 'on' }))}><option value="on">启用插件主题</option><option value="off">关闭并恢复 DSH 原始外观</option></select></label>
     <label>玩家名称<input value={settings.playerName} maxLength={20} onChange={e => setSettings(s => ({ ...s, playerName: e.target.value }))} /></label>
     <label>打字速度<select value={settings.speed} onChange={e => setSettings(s => ({ ...s, speed: e.target.value }))}><option value="instant">直接显示</option><option value="slow">慢</option><option value="normal">正常</option><option value="fast">快</option></select></label>

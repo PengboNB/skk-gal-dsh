@@ -258,6 +258,35 @@ function installSidebarResize(ctx) {
   }, 'skk-gal:sidebar-resize')
 }
 
+function installTheaterViewRegistration(ctx, switchPermission) {
+  let disposeTheater = null
+  const chatTab = () => [...document.querySelectorAll('[role="tab"]')].find(tab => textOf(tab) === '对话')
+  const closeTheater = () => {
+    if (activeTabLabel() === '丝柯克剧场') chatTab()?.click()
+    disposeTheater?.()
+    disposeTheater = null
+  }
+  const openTheater = () => {
+    if (disposeTheater || !themeEnabled()) return
+    disposeTheater = ctx.slots.inject('conversation.view', () => ctx.slots.register({
+      name: 'conversation.view',
+      id: 'skk-gal',
+      order: 6,
+      label: () => '丝柯克剧场',
+      inject: () => ({ switchPermission }),
+    }, SkirkGal))
+  }
+  const reconcile = event => themeEnabled(event?.detail || localSettings()) ? openTheater() : closeTheater()
+  reconcile()
+  window.addEventListener(THEME_EVENT, reconcile)
+  window.addEventListener('storage', reconcile)
+  ctx.effect(() => () => {
+    window.removeEventListener(THEME_EVENT, reconcile)
+    window.removeEventListener('storage', reconcile)
+    closeTheater()
+  }, 'skk-gal:theater-view-registration')
+}
+
 export function apply(ctx) {
   const style = document.createElement('style')
   style.dataset.skkGal = '1'
@@ -277,14 +306,7 @@ export function apply(ctx) {
     if (!result.value?.matched) throw new Error('当前 DSH 没有提供 /permission 命令')
     return true
   }
-
-  ctx.slots.inject('conversation.view', () => ctx.slots.register({
-    name: 'conversation.view',
-    id: 'skk-gal',
-    order: 6,
-    label: () => '丝柯克剧场',
-    inject: () => ({ switchPermission }),
-  }, SkirkGal))
+  installTheaterViewRegistration(ctx, switchPermission)
 
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
