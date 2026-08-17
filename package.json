@@ -1,6 +1,6 @@
 {
   "name": "skk-gal",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "description": "Portable Skirk-themed GAL conversation view for DeepSeek Harness Web",
   "type": "module",
   "main": "./.dsh-plugin/index.mjs",
