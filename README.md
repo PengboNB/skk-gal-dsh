@@ -6,7 +6,8 @@
 
 ## 预览
 <img width="2550" height="1395" alt="image" src="https://github.com/user-attachments/assets/960a4f57-caf6-4940-9e9f-25311ff63b97" />
-<img width="2550" height="1395" alt="屏幕截图 2026-08-17 153633" src="https://github.com/user-attachments/assets/e41753de-eac3-4662-9315-b6a25454756c" />
+<img width="2553" height="1391" alt="屏幕截图 2026-08-17 153616" src="https://github.com/user-attachments/assets/b0fa16d7-e91f-41af-bd26-95e532b7b42d" />
+
 
 
 
